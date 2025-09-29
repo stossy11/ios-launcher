@@ -40,6 +40,7 @@ static bool redirectFunction(char *name, void *patchAddr, void *target, void **o
 
 BOOL has_txm() {
 	if ([[NSUserDefaults standardUserDefaults] boolForKey:@"FORCE_TXM"]) return YES;
+	if (@available(iOS 26.0, *)) return YES;
 	if (access("/System/Volumes/Preboot/boot/usr/standalone/firmware/FUD/Ap,TrustedExecutionMonitor.img4", F_OK) == 0) return YES;
 	DIR *d = opendir("/private/preboot");
     if(!d) return NO;
