@@ -91,27 +91,26 @@ static void BreakMarkJITMapping(uint64_t addr, size_t bytes) {
     );
 }
 */
+
 __attribute__((noinline,optnone,naked))
-void BreakMarkJITMapping(uint64_t addr, size_t bytes) {
-    asm("brk #0x69 \n"
+void* JIT26PrepareRegion(void *addr, size_t len) {
+    asm("mov x16, #1 \n"
+        "brk #0xf00d \n"
         "ret");
 }
 
 static void* common_hooked_mmap(mmap_p orig, void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
-	void* map = orig(addr, len, prot, flags, fd, offset);
-	if (map == MAP_FAILED && fd && (prot & PROT_EXEC)) {
-		//map = orig(addr, len, PROT_READ | PROT_WRITE, flags | MAP_PRIVATE | MAP_ANON, 0, 0);
-		map = __mmap(addr, len, prot, flags | MAP_PRIVATE | MAP_ANON, 0, 0);
-		AppLog(@"[TXM] Writing to %p with %0x", map, len);
-        size_t newLen = len;
-        // yeah it somehow can be TOO large...
-        if (newLen > 0x100000) {
-            newLen = 0x100000;
+    void *map = orig(addr, len, prot, flags, fd, offset);
+    if (map == MAP_FAILED && fd && (prot & PROT_EXEC)) {
+        
+        map = __mmap(addr, len, prot, flags | MAP_PRIVATE | MAP_ANON, 0, 0);
+        if (has_txm()) {
+            JIT26PrepareRegion(map, len);
+           //  BreakMarkJITMapping(map, len);
         }
-		BreakMarkJITMapping((vm_address_t)map, newLen);
-		AppLog(@"[TXM] Wrote!");
-		void *memoryLoadedFile = __mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, offset);
-		// mirror `addr` (rx, JIT applied) to `mirrored` (rw)
+        
+        void *memoryLoadedFile = __mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, offset);
+        // mirror `addr` (rx, JIT applied) to `mirrored` (rw)
         vm_address_t mirrored = 0;
         vm_prot_t cur_prot, max_prot;
         kern_return_t ret = vm_remap(mach_task_self(), &mirrored, len, 0, VM_FLAGS_ANYWHERE, mach_task_self(), (vm_address_t)map, false, &cur_prot, &max_prot, VM_INHERIT_SHARE);
@@ -122,8 +121,8 @@ static void* common_hooked_mmap(mmap_p orig, void *addr, size_t len, int prot, i
             vm_deallocate(mach_task_self(), mirrored, len);
         }
         munmap(memoryLoadedFile, len);
-	}
-	return map;
+    }
+    return map;
 }
 
 static void* hooked_dyld_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
