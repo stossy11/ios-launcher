@@ -104,10 +104,8 @@ static void* common_hooked_mmap(mmap_p orig, void *addr, size_t len, int prot, i
     if (map == MAP_FAILED && fd && (prot & PROT_EXEC)) {
         
         map = __mmap(addr, len, prot, flags | MAP_PRIVATE | MAP_ANON, 0, 0);
-        if (has_txm()) {
-            JIT26PrepareRegion(map, len);
-           //  BreakMarkJITMapping(map, len);
-        }
+        
+        JIT26PrepareRegion(map, len);
         
         void *memoryLoadedFile = __mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, offset);
         // mirror `addr` (rx, JIT applied) to `mirrored` (rw)
@@ -124,7 +122,6 @@ static void* common_hooked_mmap(mmap_p orig, void *addr, size_t len, int prot, i
     }
     return map;
 }
-
 static void* hooked_dyld_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
     return common_hooked_mmap(__mmap, addr, len, prot, flags, fd, offset);
 }
