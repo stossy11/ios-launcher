@@ -184,6 +184,7 @@ void init_bypassDyldLibValidation() {
 	} else {
 		setenv("TXM_JIT", "0", 1);
 		init_bypassDyldLibValidationNonTXM();
+		return;
 	}
 
 	AppLog(@"init (TXM)");
