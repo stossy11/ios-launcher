@@ -13,6 +13,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <dirent.h>
 
 #include "utils.h"
 
@@ -35,6 +36,23 @@ static bool redirectFunction(char *name, void *patchAddr, void *target, void **o
 
 	AppLog(@"[TXM] hook %s succeed!", name);
 	return TRUE;
+}
+
+BOOL has_txm() {
+	if ([[NSUserDefaults standardUserDefaults] boolForKey:@"FORCE_TXM"]) return YES;
+	if (access("/System/Volumes/Preboot/boot/usr/standalone/firmware/FUD/Ap,TrustedExecutionMonitor.img4", F_OK) == 0) return YES;
+	DIR *d = opendir("/private/preboot");
+    if(!d) return NO;
+    struct dirent *dir;
+	char txmPath[PATH_MAX];
+    while ((dir = readdir(d)) != NULL) {
+        if(strlen(dir->d_name) == 96) {
+            snprintf(txmPath, sizeof(txmPath), "/private/preboot/%s/usr/standalone/firmware/FUD/Ap,TrustedExecutionMonitor.img4", dir->d_name);
+            break;
+        }
+    }
+    closedir(d);
+    return access(txmPath, F_OK) == 0;
 }
 
 static bool searchAndPatch(char* name, char* base, char* signature, int length, void* target, void **orig) {
@@ -104,8 +122,9 @@ static void* common_hooked_mmap(mmap_p orig, void *addr, size_t len, int prot, i
     if (map == MAP_FAILED && fd && (prot & PROT_EXEC)) {
         
         map = __mmap(addr, len, prot, flags | MAP_PRIVATE | MAP_ANON, 0, 0);
-        
-        JIT26PrepareRegion(map, len);
+        if (has_txm()) {
+        	JIT26PrepareRegion(map, len);
+		}
         
         void *memoryLoadedFile = __mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, offset);
         // mirror `addr` (rx, JIT applied) to `mirrored` (rw)
@@ -150,36 +169,23 @@ static int hooked_dyld_fcntl(int fildes, int cmd, void *param) {
     return common_hooked_fcntl(__fcntl, fildes, cmd, param);
 }
 
-#include <dirent.h>
-
-BOOL has_txm() {
-	if ([[NSUserDefaults standardUserDefaults] boolForKey:@"FORCE_TXM"]) return YES;
-	if (@available(iOS 26.0, *)) return YES;
-	if (access("/System/Volumes/Preboot/boot/usr/standalone/firmware/FUD/Ap,TrustedExecutionMonitor.img4", F_OK) == 0) return YES;
-	DIR *d = opendir("/private/preboot");
-    if(!d) return NO;
-    struct dirent *dir;
-	char txmPath[PATH_MAX];
-    while ((dir = readdir(d)) != NULL) {
-        if(strlen(dir->d_name) == 96) {
-            snprintf(txmPath, sizeof(txmPath), "/private/preboot/%s/usr/standalone/firmware/FUD/Ap,TrustedExecutionMonitor.img4", dir->d_name);
-            break;
-        }
-    }
-    closedir(d);
-    return access(txmPath, F_OK) == 0;
-}
-
 void init_bypassDyldLibValidation() {
 	static BOOL bypassed;
 	if (bypassed)
 		return;
 	bypassed = YES;
 
-    if (!has_txm()) {
-        init_bypassDyldLibValidationNonTXM();
-        return;
-    }
+	if (@available(iOS 19.0, *)) {
+		if (has_txm()) {
+			setenv("TXM_JIT", "1", 1);
+		} else {
+			setenv("TXM_JIT", "0", 1);
+		}
+	} else {
+		setenv("TXM_JIT", "0", 1);
+		init_bypassDyldLibValidationNonTXM();
+	}
+
 	AppLog(@"init (TXM)");
     // ty https://github.com/LiveContainer/LiveContainer/tree/jitless
     char* dyldBase = getDyldBase();
